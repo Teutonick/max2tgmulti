@@ -14,6 +14,38 @@ log = logging.getLogger(__name__)
 
 DEBUG_DIR = "debug"
 
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+_BROWSER_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "sec-ch-ua": '"Chromium";v="131", "Google Chrome";v="131", "Not?A_Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+}
+
+_WS_HEADERS = {
+    **_BROWSER_HEADERS,
+    "Origin": "https://web.max.ru",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+}
+
+_HTTP_HEADERS = {
+    **_BROWSER_HEADERS,
+    "Origin": "https://web.max.ru",
+    "Referer": "https://web.max.ru/",
+    "Accept": "*/*",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "cross-site",
+}
+
 
 class OpCode(IntEnum):
     HEARTBEAT_PING = 1
@@ -59,6 +91,7 @@ class MaxClient:
         self._on_ready_cb = None
         self._on_message_cb = None
         self._heartbeat_task: asyncio.Task | None = None
+        self._session: aiohttp.ClientSession | None = None
         self._dispatch_counter = 0
         self._pending: dict[int, asyncio.Future] = {}
 
@@ -119,25 +152,16 @@ class MaxClient:
     # ── main loop ──────────────────────────────────────────────────
 
     async def run(self):
-        headers = {
-            "Origin": "https://web.max.ru",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Cache-Control": "no-cache",
-        }
-
         if self.debug:
             os.makedirs(DEBUG_DIR, exist_ok=True)
 
-        async with aiohttp.ClientSession():
+        async with aiohttp.ClientSession(headers=_BROWSER_HEADERS) as session:
+            self._session = session
             while True:
                 try:
                     log.info("Connecting to %s ...", self.WS_URL)
-                    async with aiohttp.ClientSession().ws_connect(
-                        self.WS_URL, headers=headers, ssl=False
+                    async with session.ws_connect(
+                        self.WS_URL, headers=_WS_HEADERS, ssl=False
                     ) as ws:
                         self._ws = ws
                         self._seq = 0
@@ -150,7 +174,7 @@ class MaxClient:
                                 "deviceId": self.device_id,
                                 "userAgent": {
                                     "deviceType": "WEB",
-                                    "deviceName": "Chrome",
+                                    "deviceName": "Chrome 131.0.0.0",
                                 },
                                 "appVersion": "25.12.11",
                             },
@@ -276,20 +300,26 @@ class MaxClient:
 
     async def download_file(self, url: str) -> bytes | None:
         """Download a file by URL, returning raw bytes or None on failure."""
+        session = getattr(self, "_session", None)
+        close_after = False
+        if session is None or session.closed:
+            session = aiohttp.ClientSession(headers=_BROWSER_HEADERS)
+            close_after = True
         try:
-            headers = {
-                "Origin": "https://web.max.ru",
-                "Referer": "https://web.max.ru/",
-            }
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, ssl=False, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                    if resp.status == 200:
-                        data = await resp.read()
-                        log.info("Downloaded %s (%d bytes)", url[:120], len(data))
-                        return data
-                    log.warning("Download failed %s — HTTP %d", url[:120], resp.status)
+            async with session.get(
+                url, headers=_HTTP_HEADERS, ssl=False,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    log.info("Downloaded %s (%d bytes)", url[:120], len(data))
+                    return data
+                log.warning("Download failed %s — HTTP %d", url[:120], resp.status)
         except Exception:
             log.exception("Download error: %s", url[:120])
+        finally:
+            if close_after:
+                await session.close()
         return None
 
     # ── message parsing ────────────────────────────────────────────
