@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 @dataclass(frozen=True)
 class Settings:
     tg_bot_token: str
+    tg_admin_id: int
     tg_chat_id: str | None
     db_path: str
     debug: bool = False
@@ -16,7 +17,7 @@ class Settings:
 def load_settings() -> Settings:
     load_dotenv()
 
-    required = ["TG_BOT_TOKEN"]
+    required = ["TG_BOT_TOKEN", "TG_ADMIN_ID"]
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise SystemExit(
@@ -26,6 +27,7 @@ def load_settings() -> Settings:
 
     return Settings(
         tg_bot_token=os.environ["TG_BOT_TOKEN"],
+        tg_admin_id=int(os.environ["TG_ADMIN_ID"]),
         tg_chat_id=os.environ.get("TG_CHAT_ID") or None,
         db_path=os.environ.get("DB_PATH", "data/max2tg.sqlite3"),
         debug=os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"),

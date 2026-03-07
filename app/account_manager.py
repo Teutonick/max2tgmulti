@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 
 from app.max_listener import create_max_client
-from app.storage import MaxAccountRecord, Storage
+from app.storage import MaxAccountRecord, Storage, TgUserRecord
 from app.tg_sender import TelegramSender
 
 log = logging.getLogger(__name__)
@@ -57,6 +57,7 @@ class AccountManager:
         max_device_id: str,
         title: str = "",
     ) -> MaxAccountRecord:
+        await self._storage.ensure_user(tg_user_id)
         record = await self._storage.add_account(
             tg_user_id=tg_user_id,
             max_token=max_token,
@@ -74,7 +75,24 @@ class AccountManager:
         return True
 
     async def list_accounts_for_user(self, tg_user_id: int) -> list[MaxAccountRecord]:
+        await self._storage.ensure_user(tg_user_id)
         return await self._storage.list_accounts_for_user(tg_user_id)
+
+    async def ensure_user(self, tg_user_id: int) -> TgUserRecord:
+        return await self._storage.ensure_user(tg_user_id)
+
+    async def activate_user(self, tg_user_id: int) -> TgUserRecord:
+        return await self._storage.activate_user(tg_user_id)
+
+    async def deactivate_user(self, tg_user_id: int) -> TgUserRecord:
+        return await self._storage.deactivate_user(tg_user_id)
+
+    async def list_users(self) -> list[TgUserRecord]:
+        return await self._storage.list_users()
+
+    async def is_user_active(self, tg_user_id: int) -> bool:
+        user = await self._storage.ensure_user(tg_user_id)
+        return user.is_active
 
     async def send_message(self, account_id: int, tg_user_id: int, max_chat_id, text: str) -> bool:
         record = await self._storage.get_account(account_id)

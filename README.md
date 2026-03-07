@@ -69,6 +69,7 @@ cp .env.example .env
 | Переменная | Обязательная | Описание |
 |---|---|---|
 | `TG_BOT_TOKEN` | да | Токен Telegram-бота |
+| `TG_ADMIN_ID` | да | Telegram ID администратора бота |
 | `DB_PATH` | нет | Путь к SQLite БД (по умолчанию `data/max2tg.sqlite3`) |
 | `DEBUG` | нет | `true` — подробные логи |
 | `REPLY_ENABLED` | нет | `true` — разрешить ответы из Telegram в Max |
@@ -81,6 +82,14 @@ cp .env.example .env
 - `/register <device_id> <token> [name]`
 - `/accounts`
 - `/remove <account_id>`
+
+Для администратора:
+
+- `/bind <tg_user_id> <device_id> <token> [name]`
+- `/activate <tg_user_id>`
+- `/deactivate <tg_user_id>`
+- `/users`
+- `/help`
 
 ## Запуск
 
@@ -283,6 +292,7 @@ cp .env.example .env
 | Variable | Required | Description |
 |---|---|---|
 | `TG_BOT_TOKEN` | yes | Telegram bot token |
+| `TG_ADMIN_ID` | yes | Telegram bot admin user ID |
 | `DB_PATH` | no | SQLite path (default `data/max2tg.sqlite3`) |
 | `DEBUG` | no | `true` — verbose logs |
 | `REPLY_ENABLED` | no | `true` — enable replies from Telegram to Max |
@@ -295,6 +305,14 @@ Register MAX accounts via Telegram:
 - `/register <device_id> <token> [name]`
 - `/accounts`
 - `/remove <account_id>`
+
+For admin:
+
+- `/bind <tg_user_id> <device_id> <token> [name]`
+- `/activate <tg_user_id>`
+- `/deactivate <tg_user_id>`
+- `/users`
+- `/help`
 
 ## Running
 

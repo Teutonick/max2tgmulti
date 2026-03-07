@@ -17,6 +17,15 @@ class MaxAccountRecord:
     is_active: bool
 
 
+@dataclass(frozen=True)
+class TgUserRecord:
+    tg_user_id: int
+    is_active: bool
+    created_at: str
+    activated_at: str | None
+    accounts_count: int = 0
+
+
 class Storage:
     def __init__(self, db_path: str):
         self._db_path = db_path
@@ -24,6 +33,16 @@ class Storage:
     async def init(self) -> None:
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tg_users (
+                    tg_user_id INTEGER PRIMARY KEY,
+                    is_active INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    activated_at TEXT
+                )
+                """
+            )
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS max_accounts (
@@ -49,6 +68,108 @@ class Storage:
             title=str(row["title"] or ""),
             is_active=bool(row["is_active"]),
         )
+
+    @staticmethod
+    def _row_to_user(row: Any) -> TgUserRecord:
+        return TgUserRecord(
+            tg_user_id=int(row["tg_user_id"]),
+            is_active=bool(row["is_active"]),
+            created_at=str(row["created_at"]),
+            activated_at=str(row["activated_at"]) if row["activated_at"] else None,
+            accounts_count=int(row["accounts_count"]) if "accounts_count" in row.keys() else 0,
+        )
+
+    async def ensure_user(self, tg_user_id: int) -> TgUserRecord:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute(
+                """
+                INSERT INTO tg_users (tg_user_id, is_active)
+                VALUES (?, 0)
+                ON CONFLICT(tg_user_id) DO NOTHING
+                """,
+                (tg_user_id,),
+            )
+            await db.commit()
+            cur = await db.execute(
+                "SELECT * FROM tg_users WHERE tg_user_id = ?",
+                (tg_user_id,),
+            )
+            row = await cur.fetchone()
+            return self._row_to_user(row)
+
+    async def get_user(self, tg_user_id: int) -> TgUserRecord | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM tg_users WHERE tg_user_id = ?",
+                (tg_user_id,),
+            )
+            row = await cur.fetchone()
+            return self._row_to_user(row) if row else None
+
+    async def activate_user(self, tg_user_id: int) -> TgUserRecord:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute(
+                """
+                INSERT INTO tg_users (tg_user_id, is_active, activated_at)
+                VALUES (?, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(tg_user_id) DO UPDATE SET
+                    is_active=1,
+                    activated_at=CURRENT_TIMESTAMP
+                """,
+                (tg_user_id,),
+            )
+            await db.commit()
+            cur = await db.execute(
+                "SELECT * FROM tg_users WHERE tg_user_id = ?",
+                (tg_user_id,),
+            )
+            row = await cur.fetchone()
+            return self._row_to_user(row)
+
+    async def deactivate_user(self, tg_user_id: int) -> TgUserRecord:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute(
+                """
+                INSERT INTO tg_users (tg_user_id, is_active, activated_at)
+                VALUES (?, 0, NULL)
+                ON CONFLICT(tg_user_id) DO UPDATE SET
+                    is_active=0,
+                    activated_at=NULL
+                """,
+                (tg_user_id,),
+            )
+            await db.commit()
+            cur = await db.execute(
+                "SELECT * FROM tg_users WHERE tg_user_id = ?",
+                (tg_user_id,),
+            )
+            row = await cur.fetchone()
+            return self._row_to_user(row)
+
+    async def list_users(self) -> list[TgUserRecord]:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT
+                    u.tg_user_id,
+                    u.is_active,
+                    u.created_at,
+                    u.activated_at,
+                    COUNT(a.id) as accounts_count
+                FROM tg_users u
+                LEFT JOIN max_accounts a
+                    ON a.tg_user_id = u.tg_user_id AND a.is_active = 1
+                GROUP BY u.tg_user_id, u.is_active, u.created_at, u.activated_at
+                ORDER BY u.created_at DESC
+                """
+            )
+            rows = await cur.fetchall()
+            return [self._row_to_user(row) for row in rows]
 
     async def add_account(
         self,

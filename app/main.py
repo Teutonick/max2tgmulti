@@ -75,11 +75,15 @@ async def main():
     await _bootstrap_legacy_account(settings, storage, manager)
     await manager.start_all()
 
-    tg_app = build_tg_app(settings.tg_bot_token, manager)
+    tg_app = build_tg_app(settings.tg_bot_token, manager, settings.tg_admin_id)
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
     log.info("Telegram polling started")
+    try:
+        await sender.bot.send_message(chat_id=settings.tg_admin_id, text="я запустился")
+    except Exception:
+        log.exception("Failed to send startup notification to admin_id=%s", settings.tg_admin_id)
 
     try:
         while True:
