@@ -74,7 +74,8 @@ cp .env.example .env
 | `TG_BOT_TOKEN` | да | Токен Telegram-бота |
 | `TG_ADMIN_ID` | да | Telegram ID администратора бота |
 | `DB_PATH` | нет | Путь к SQLite БД (по умолчанию `data/max2tg.sqlite3`) |
-| `REDIS_URL` | нет | URL Redis для внешней очереди отправки |
+| `REDIS_URL` | нет | URL Redis для внешней очереди отправки (по умолчанию `redis://127.0.0.1:6379/0`; при недоступности fallback в память) |
+| `REDIS_KEY_PREFIX` | нет | Глобальный префикс ключей Redis (по умолчанию `max2tg`) |
 | `TG_QUEUE_WORKERS` | нет | Количество воркеров отправки в TG |
 | `TG_MIN_SEND_INTERVAL_MS` | нет | Минимальный интервал между отправками (мс) |
 | `TG_QUEUE_MAX_ATTEMPTS` | нет | Количество попыток отправки через очередь |
@@ -128,6 +129,29 @@ docker-compose down
 ```bash
 docker-compose up -d --build
 ```
+
+### Redis (опционально, вручную перед первым запуском)
+
+Если нужен устойчивый queue/cooldown через Redis (рекомендуется при высоком потоке сообщений), установите Redis отдельно.
+
+Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+redis-cli ping
+```
+
+Ожидаемый ответ: `PONG`.
+
+В `.env` оставьте:
+
+```env
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+Если Redis не установлен или недоступен, приложение автоматически работает с in-memory fallback.
 
 ### Локальный запуск
 
@@ -304,7 +328,8 @@ cp .env.example .env
 | `TG_BOT_TOKEN` | yes | Telegram bot token |
 | `TG_ADMIN_ID` | yes | Telegram bot admin user ID |
 | `DB_PATH` | no | SQLite path (default `data/max2tg.sqlite3`) |
-| `REDIS_URL` | no | Redis URL for outbound queue backend |
+| `REDIS_URL` | no | Redis URL for outbound queue backend (default `redis://127.0.0.1:6379/0`; falls back to memory if unavailable) |
+| `REDIS_KEY_PREFIX` | no | Global Redis key prefix (default `max2tg`) |
 | `TG_QUEUE_WORKERS` | no | Number of TG sender workers |
 | `TG_MIN_SEND_INTERVAL_MS` | no | Minimum delay between sends (ms) |
 | `TG_QUEUE_MAX_ATTEMPTS` | no | Number of queue send attempts |
@@ -358,6 +383,29 @@ Rebuild after update:
 ```bash
 docker-compose up -d --build
 ```
+
+### Redis (optional, install manually before first run)
+
+If you want durable queue/cooldown with Redis (recommended for high traffic), install Redis separately.
+
+Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+redis-cli ping
+```
+
+Expected output: `PONG`.
+
+Keep in `.env`:
+
+```env
+REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+If Redis is not available, the app automatically uses in-memory fallback.
 
 ### Local
 

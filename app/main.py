@@ -8,6 +8,7 @@ import redis.asyncio as redis
 
 from app.account_manager import AccountManager
 from app.config import load_settings
+from app.cooldown_store import MemoryCooldownStore
 from app.maintenance import configure_logging, weekly_backup_loop
 from app.message_queue import QueuedTelegramSender
 from app.storage import Storage
@@ -65,6 +66,7 @@ async def main():
     sender = QueuedTelegramSender(
         sender=tg_transport,
         redis_url=settings.redis_url,
+        redis_key_prefix=settings.redis_key_prefix,
         workers=settings.tg_queue_workers,
         min_send_interval_ms=settings.tg_min_send_interval_ms,
         max_attempts=settings.tg_queue_max_attempts,
@@ -82,15 +84,23 @@ async def main():
     await manager.start_all()
 
     tg_app = build_tg_app(settings.tg_bot_token, manager, settings.tg_admin_id)
+    tg_app.bot_data["redis_key_prefix"] = settings.redis_key_prefix
     askme_redis = None
+    cooldown_store = MemoryCooldownStore()
     if settings.redis_url:
         try:
             askme_redis = redis.from_url(settings.redis_url, decode_responses=True)
             await askme_redis.ping()
-            tg_app.bot_data["askme_redis"] = askme_redis
+            cooldown_store = askme_redis
+            log.info("Askme cooldown backend: redis (%s)", settings.redis_url)
         except Exception:
-            log.exception("Failed to initialize Redis client for /askme")
+            log.exception(
+                "Redis unavailable at %s, fallback to in-memory cooldown store. "
+                "To enable Redis manually, start Redis and verify REDIS_URL.",
+                settings.redis_url,
+            )
             askme_redis = None
+    tg_app.bot_data["askme_cooldown"] = cooldown_store
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)

@@ -36,12 +36,12 @@ class _RedisQueueBackend:
     def __init__(
         self,
         redis_url: str,
-        queue_key: str = "max2tg:tg:queue",
-        processing_key: str = "max2tg:tg:queue:processing",
+        key_prefix: str = "max2tg",
     ):
         self._redis_url = redis_url
-        self._queue_key = queue_key
-        self._processing_key = processing_key
+        safe_prefix = (key_prefix or "max2tg").strip(":")
+        self._queue_key = f"{safe_prefix}:tg:queue"
+        self._processing_key = f"{safe_prefix}:tg:queue:processing"
         self._redis = None
 
     async def start(self) -> None:
@@ -106,6 +106,7 @@ class QueuedTelegramSender:
         self,
         sender: TelegramSender,
         redis_url: str | None = None,
+        redis_key_prefix: str = "max2tg",
         workers: int = 3,
         min_send_interval_ms: int = 80,
         max_attempts: int = 3,
@@ -123,13 +124,19 @@ class QueuedTelegramSender:
         self._backend = _LocalQueueBackend()
         self._redis_backend = None
         if redis_url:
-            self._redis_backend = _RedisQueueBackend(redis_url)
+            self._redis_backend = _RedisQueueBackend(redis_url, key_prefix=redis_key_prefix)
             self._backend = self._redis_backend
 
     async def start(self) -> None:
         if self._redis_backend:
-            await self._redis_backend.start()
-            log.info("Telegram queue backend: redis")
+            try:
+                await self._redis_backend.start()
+                log.info("Telegram queue backend: redis")
+            except Exception:
+                log.exception("Redis queue backend unavailable, fallback to local memory queue")
+                self._redis_backend = None
+                self._backend = _LocalQueueBackend()
+                log.info("Telegram queue backend: local memory")
         else:
             log.info("Telegram queue backend: local memory")
         for idx in range(self._workers_count):

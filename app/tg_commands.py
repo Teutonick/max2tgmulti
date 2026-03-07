@@ -150,8 +150,9 @@ def _display_user(update: Update) -> str:
     return full_name or "без username"
 
 
-def _askme_key(tg_user_id: int) -> str:
-    return f"max2tg:askme:cooldown:{tg_user_id}"
+def _askme_key(context: ContextTypes.DEFAULT_TYPE, tg_user_id: int) -> str:
+    prefix = str(context.bot_data.get("redis_key_prefix", "max2tg")).strip(":")
+    return f"{prefix}:askme:cooldown:{tg_user_id}"
 
 
 async def _notify_admin_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -498,16 +499,14 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.pop(PENDING_ASKME_KEY, None):
-        redis_client = context.bot_data.get("askme_redis")
-        if not redis_client:
-            await update.message.reply_text(
-                "⚠️ Отправка администратору временно недоступна (Redis не настроен)."
-            )
+        cooldown_store = context.bot_data.get("askme_cooldown")
+        if not cooldown_store:
+            await update.message.reply_text("⚠️ Отправка администратору временно недоступна.")
             return
         tg_user_id = int(update.effective_user.id)
-        cooldown_key = _askme_key(tg_user_id)
+        cooldown_key = _askme_key(context, tg_user_id)
         try:
-            ttl = await redis_client.ttl(cooldown_key)
+            ttl = await cooldown_store.ttl(cooldown_key)
             if ttl and ttl > 0:
                 hours = ttl // 3600
                 minutes = (ttl % 3600) // 60
@@ -521,7 +520,7 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text("⚠️ Сообщение пустое. Отправьте текст.")
                 return
             text = text[:1000]
-            await redis_client.set(cooldown_key, "1", ex=ASKME_COOLDOWN_SEC)
+            await cooldown_store.set(cooldown_key, "1", ex=ASKME_COOLDOWN_SEC)
 
             admin_id = int(context.bot_data["admin_id"])
             username = _display_user(update)
@@ -534,7 +533,7 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 await context.bot.send_message(chat_id=admin_id, text=admin_text, parse_mode="HTML")
             except Exception:
-                await redis_client.delete(cooldown_key)
+                await cooldown_store.delete(cooldown_key)
                 raise
             await update.message.reply_text("✅ Запрос отправлен администратору.")
         except Exception:

@@ -11,6 +11,7 @@ class Settings:
     tg_chat_id: str | None
     db_path: str
     redis_url: str | None
+    redis_key_prefix: str
     tg_queue_workers: int
     tg_min_send_interval_ms: int
     tg_queue_max_attempts: int
@@ -34,7 +35,8 @@ def load_settings() -> Settings:
         tg_admin_id=int(os.environ["TG_ADMIN_ID"]),
         tg_chat_id=os.environ.get("TG_CHAT_ID") or None,
         db_path=os.environ.get("DB_PATH", "data/max2tg.sqlite3"),
-        redis_url=os.environ.get("REDIS_URL") or None,
+        redis_url=os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
+        redis_key_prefix=os.environ.get("REDIS_KEY_PREFIX", "max2tg"),
         tg_queue_workers=int(os.environ.get("TG_QUEUE_WORKERS", "3")),
         tg_min_send_interval_ms=int(os.environ.get("TG_MIN_SEND_INTERVAL_MS", "80")),
         tg_queue_max_attempts=int(os.environ.get("TG_QUEUE_MAX_ATTEMPTS", "3")),
