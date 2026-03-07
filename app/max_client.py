@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -11,8 +10,6 @@ from typing import Any
 import aiohttp
 
 log = logging.getLogger(__name__)
-
-DEBUG_DIR = "debug"
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -94,6 +91,7 @@ class MaxClient:
         self._session: aiohttp.ClientSession | None = None
         self._dispatch_counter = 0
         self._pending: dict[int, asyncio.Future] = {}
+        self._stop_event = asyncio.Event()
 
     # ── decorator API ──────────────────────────────────────────────
 
@@ -152,12 +150,9 @@ class MaxClient:
     # ── main loop ──────────────────────────────────────────────────
 
     async def run(self):
-        if self.debug:
-            os.makedirs(DEBUG_DIR, exist_ok=True)
-
         async with aiohttp.ClientSession(headers=_BROWSER_HEADERS) as session:
             self._session = session
-            while True:
+            while not self._stop_event.is_set():
                 try:
                     log.info("Connecting to %s ...", self.WS_URL)
                     async with session.ws_connect(
@@ -205,8 +200,15 @@ class MaxClient:
                             fut.cancel()
                     self._pending.clear()
 
+                if self._stop_event.is_set():
+                    break
                 log.info("Reconnecting in %ds...", self.RECONNECT_SEC)
                 await asyncio.sleep(self.RECONNECT_SEC)
+
+    async def stop(self) -> None:
+        self._stop_event.set()
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
 
     # ── event dispatcher ───────────────────────────────────────────
 
@@ -249,18 +251,12 @@ class MaxClient:
         elif op == OpCode.AUTH_SNAPSHOT and cmd == 1:
             self._my_id = payload.get("profile", {}).get("id")
             log.info("Authorized! my_id=%s", self._my_id)
-            if self.debug:
-                self._dump_json("snapshot.json", payload)
 
             if self._on_ready_cb:
                 await self._on_ready_cb(payload)
 
         elif op == OpCode.DISPATCH:
             self._dispatch_counter += 1
-            if self.debug and self._dispatch_counter <= 20:
-                self._dump_json(
-                    f"dispatch_{self._dispatch_counter:04d}.json", payload
-                )
 
             if self._on_message_cb:
                 msg = self._parse_message(payload)
@@ -280,7 +276,6 @@ class MaxClient:
         if not contact_ids:
             return {}
         resp = await self.cmd(OpCode.CONTACT_GET, {"contactIds": contact_ids})
-        self._dump_json("contacts_response.json", resp)
         log.info("fetch_contacts(%s) → keys: %s", contact_ids, list(resp.keys()))
         return resp
 
@@ -345,14 +340,3 @@ class MaxClient:
 
         return msg
 
-    # ── debug helpers ──────────────────────────────────────────────
-
-    @staticmethod
-    def _dump_json(filename: str, data: dict) -> None:
-        path = os.path.join(DEBUG_DIR, filename)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            log.info("Dumped %s (%d bytes)", path, os.path.getsize(path))
-        except Exception:
-            log.exception("Failed to dump %s", path)

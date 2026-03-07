@@ -6,10 +6,9 @@ from dotenv import load_dotenv
 
 @dataclass(frozen=True)
 class Settings:
-    max_token: str
-    max_device_id: str
     tg_bot_token: str
-    tg_chat_id: str
+    tg_chat_id: str | None
+    db_path: str
     debug: bool = False
     reply_enabled: bool = False
 
@@ -17,7 +16,7 @@ class Settings:
 def load_settings() -> Settings:
     load_dotenv()
 
-    required = ["MAX_TOKEN", "MAX_DEVICE_ID", "TG_BOT_TOKEN", "TG_CHAT_ID"]
+    required = ["TG_BOT_TOKEN"]
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise SystemExit(
@@ -26,10 +25,9 @@ def load_settings() -> Settings:
         )
 
     return Settings(
-        max_token=os.environ["MAX_TOKEN"],
-        max_device_id=os.environ["MAX_DEVICE_ID"],
         tg_bot_token=os.environ["TG_BOT_TOKEN"],
-        tg_chat_id=os.environ["TG_CHAT_ID"],
+        tg_chat_id=os.environ.get("TG_CHAT_ID") or None,
+        db_path=os.environ.get("DB_PATH", "data/max2tg.sqlite3"),
         debug=os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"),
         reply_enabled=os.environ.get("REPLY_ENABLED", "").lower() in ("1", "true", "yes"),
     )

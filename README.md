@@ -23,8 +23,10 @@
 - Пересылка текстовых сообщений, фото, видео, файлов, аудио, стикеров, контактов, геолокаций и ссылок
 - Поддержка пересланных и цитируемых сообщений (forward / reply)
 - Разное оформление для личных и групповых чатов
-- Ответ из Telegram обратно в Max (опционально, через inline-кнопку)
+- Ответ из Telegram обратно в Max (inline-кнопка, маршрутизация по нужному аккаунту)
 - Работает как userbot — подключается к вашему аккаунту Max через WebSocket
+- Поддержка нескольких MAX-аккаунтов одновременно
+- Легковесное хранение только реквизитов подключения и связки с Telegram-пользователем (SQLite)
 - Docker-ready: разворачивается одной командой
 
 ## Требования
@@ -66,12 +68,19 @@ cp .env.example .env
 
 | Переменная | Обязательная | Описание |
 |---|---|---|
-| `MAX_TOKEN` | да | Токен авторизации Max |
-| `MAX_DEVICE_ID` | да | ID устройства Max |
 | `TG_BOT_TOKEN` | да | Токен Telegram-бота |
-| `TG_CHAT_ID` | да | ID чата, куда пересылать сообщения |
-| `DEBUG` | нет | `true` — подробные логи + дамп JSON в `debug/` |
+| `DB_PATH` | нет | Путь к SQLite БД (по умолчанию `data/max2tg.sqlite3`) |
+| `DEBUG` | нет | `true` — подробные логи |
 | `REPLY_ENABLED` | нет | `true` — разрешить ответы из Telegram в Max |
+| `MAX_TOKEN` | нет | legacy bootstrap для авто-регистрации первого аккаунта |
+| `MAX_DEVICE_ID` | нет | legacy bootstrap для авто-регистрации первого аккаунта |
+| `TG_CHAT_ID` | нет | legacy bootstrap: TG user/chat для первой связки |
+
+Регистрация MAX-аккаунтов выполняется через Telegram:
+
+- `/register <device_id> <token> [name]`
+- `/accounts`
+- `/remove <account_id>`
 
 ## Запуск
 
@@ -190,8 +199,8 @@ Max (WebSocket) ──→ max2tg ──→ Telegram Bot ──→ Ваш чат
 ```
 
 1. Приложение подключается к Max через WebSocket как ваш аккаунт
-2. Новые входящие сообщения пересылаются в указанный Telegram-чат
-3. Если `REPLY_ENABLED=true`, под каждым сообщением появляется кнопка «Ответить» — нажав её, можно написать текст, который отправится обратно в соответствующий чат Max
+2. Для каждого зарегистрированного MAX-аккаунта сообщения пересылаются владельцу в Telegram (приватный чат с ботом)
+3. Если `REPLY_ENABLED=true`, под сообщением есть кнопка «Ответить», reply уходит в исходный чат и исходный MAX-аккаунт
 
 ## Структура проекта
 
@@ -204,7 +213,9 @@ max2tg/
 │   ├── max_listener.py   # обработка и форматирование сообщений
 │   ├── resolver.py       # кеш и резолвинг имён контактов/чатов
 │   ├── tg_sender.py      # отправка сообщений в Telegram
-│   └── tg_handler.py     # обработка ответов из Telegram
+│   ├── tg_handler.py     # команды и обработка ответов из Telegram
+│   ├── storage.py        # SQLite-хранилище связок MAX↔TG
+│   └── account_manager.py # рантайм-менеджер мульти-аккаунтов
 ├── .env.example
 ├── Dockerfile
 ├── docker-compose.yml
@@ -226,8 +237,10 @@ Real-time message forwarding from **Max** messenger (max.ru) to **Telegram** —
 - Forwards text messages, photos, videos, files, audio, stickers, contacts, locations, and links
 - Supports forwarded and quoted messages (forward / reply)
 - Different formatting for DMs and group chats
-- Reply from Telegram back to Max (optional, via inline button)
+- Reply from Telegram back to Max (inline button, routed to the correct account)
 - Works as a userbot — connects to your Max account via WebSocket
+- Multiple MAX accounts at the same time
+- Lightweight storage for account credentials and MAX↔Telegram user bindings only (SQLite)
 - Docker-ready: deploy with a single command
 
 ## Requirements
@@ -269,12 +282,19 @@ cp .env.example .env
 
 | Variable | Required | Description |
 |---|---|---|
-| `MAX_TOKEN` | yes | Max auth token |
-| `MAX_DEVICE_ID` | yes | Max device ID |
 | `TG_BOT_TOKEN` | yes | Telegram bot token |
-| `TG_CHAT_ID` | yes | Chat ID to forward messages to |
-| `DEBUG` | no | `true` — verbose logs + JSON dumps to `debug/` |
+| `DB_PATH` | no | SQLite path (default `data/max2tg.sqlite3`) |
+| `DEBUG` | no | `true` — verbose logs |
 | `REPLY_ENABLED` | no | `true` — enable replies from Telegram to Max |
+| `MAX_TOKEN` | no | legacy bootstrap for first account |
+| `MAX_DEVICE_ID` | no | legacy bootstrap for first account |
+| `TG_CHAT_ID` | no | legacy bootstrap target TG user/chat |
+
+Register MAX accounts via Telegram:
+
+- `/register <device_id> <token> [name]`
+- `/accounts`
+- `/remove <account_id>`
 
 ## Running
 
@@ -393,8 +413,8 @@ Max (WebSocket) ──→ max2tg ──→ Telegram Bot ──→ Your chat
 ```
 
 1. The app connects to Max via WebSocket using your account credentials
-2. Incoming messages are forwarded to the specified Telegram chat
-3. If `REPLY_ENABLED=true`, each message includes a "Reply" button — press it, type your response, and it gets sent back to the corresponding Max chat
+2. Incoming messages for each registered MAX account are forwarded to that account owner in Telegram private chat
+3. If `REPLY_ENABLED=true`, each message includes a "Reply" button and the response is routed back to the original Max chat/account
 
 ## Project Structure
 
@@ -407,7 +427,9 @@ max2tg/
 │   ├── max_listener.py   # message processing and formatting
 │   ├── resolver.py       # contact/chat name cache and resolution
 │   ├── tg_sender.py      # sends messages to Telegram
-│   └── tg_handler.py     # handles replies from Telegram
+│   ├── tg_handler.py     # commands and reply handling from Telegram
+│   ├── storage.py        # SQLite bindings storage
+│   └── account_manager.py # multi-account runtime manager
 ├── .env.example
 ├── Dockerfile
 ├── docker-compose.yml
