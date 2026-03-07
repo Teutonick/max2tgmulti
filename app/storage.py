@@ -22,6 +22,7 @@ class TgUserRecord:
     tg_user_id: int
     is_active: bool
     created_at: str
+    terms_accepted_at: str | None
     activated_at: str | None
     accounts_count: int = 0
 
@@ -39,6 +40,7 @@ class Storage:
                     tg_user_id INTEGER PRIMARY KEY,
                     is_active INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    terms_accepted_at TEXT,
                     activated_at TEXT
                 )
                 """
@@ -55,6 +57,52 @@ class Storage:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
+            )
+            await self._ensure_column(db, "tg_users", "terms_accepted_at", "TEXT")
+            # Migrate legacy consents table into tg_users.terms_accepted_at when present.
+            consent_exists_cur = await db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tg_user_consents' LIMIT 1"
+            )
+            consent_exists = await consent_exists_cur.fetchone()
+            if consent_exists:
+                await db.execute(
+                    """
+                    UPDATE tg_users
+                    SET terms_accepted_at = COALESCE(
+                        terms_accepted_at,
+                        (SELECT c.accepted_at FROM tg_user_consents c WHERE c.tg_user_id = tg_users.tg_user_id)
+                    )
+                    """
+                )
+            await db.commit()
+
+    async def _ensure_column(self, db: aiosqlite.Connection, table: str, column: str, column_sql: str) -> None:
+        cur = await db.execute(f"PRAGMA table_info({table})")
+        rows = await cur.fetchall()
+        cols = {str(row[1]) for row in rows}
+        if column not in cols:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_sql}")
+
+    async def has_terms_consent(self, tg_user_id: int) -> bool:
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT 1 FROM tg_users WHERE tg_user_id = ? AND terms_accepted_at IS NOT NULL LIMIT 1",
+                (tg_user_id,),
+            )
+            row = await cur.fetchone()
+            return row is not None
+
+    async def accept_terms(self, tg_user_id: int) -> None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO tg_users (tg_user_id, is_active, terms_accepted_at)
+                VALUES (?, 0, CURRENT_TIMESTAMP)
+                ON CONFLICT(tg_user_id) DO UPDATE SET
+                    terms_accepted_at = COALESCE(tg_users.terms_accepted_at, CURRENT_TIMESTAMP)
+                """,
+                (tg_user_id,),
             )
             await db.commit()
 
@@ -75,6 +123,7 @@ class Storage:
             tg_user_id=int(row["tg_user_id"]),
             is_active=bool(row["is_active"]),
             created_at=str(row["created_at"]),
+            terms_accepted_at=str(row["terms_accepted_at"]) if row["terms_accepted_at"] else None,
             activated_at=str(row["activated_at"]) if row["activated_at"] else None,
             accounts_count=int(row["accounts_count"]) if "accounts_count" in row.keys() else 0,
         )
@@ -84,8 +133,8 @@ class Storage:
             db.row_factory = aiosqlite.Row
             await db.execute(
                 """
-                INSERT INTO tg_users (tg_user_id, is_active)
-                VALUES (?, 0)
+                INSERT INTO tg_users (tg_user_id, is_active, terms_accepted_at)
+                VALUES (?, 0, CURRENT_TIMESTAMP)
                 ON CONFLICT(tg_user_id) DO NOTHING
                 """,
                 (tg_user_id,),
@@ -165,12 +214,13 @@ class Storage:
                     u.tg_user_id,
                     u.is_active,
                     u.created_at,
+                    u.terms_accepted_at,
                     u.activated_at,
                     COUNT(a.id) as accounts_count
                 FROM tg_users u
                 LEFT JOIN max_accounts a
                     ON a.tg_user_id = u.tg_user_id AND a.is_active = 1
-                GROUP BY u.tg_user_id, u.is_active, u.created_at, u.activated_at
+                GROUP BY u.tg_user_id, u.is_active, u.created_at, u.terms_accepted_at, u.activated_at
                 ORDER BY u.created_at DESC
                 LIMIT ? OFFSET ?
                 """

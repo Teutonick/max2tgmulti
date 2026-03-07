@@ -4,6 +4,8 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import redis.asyncio as redis
+
 from app.account_manager import AccountManager
 from app.config import load_settings
 from app.maintenance import configure_logging, weekly_backup_loop
@@ -33,13 +35,16 @@ async def _bootstrap_legacy_account(settings, storage: Storage, manager: Account
     if existing:
         return
 
-    await manager.add_account(
-        tg_user_id=tg_user_id,
-        max_token=max_token,
-        max_device_id=max_device_id,
-        title="legacy-env",
-    )
-    log.info("Legacy account from .env has been registered automatically")
+    try:
+        await manager.add_account(
+            tg_user_id=tg_user_id,
+            max_token=max_token,
+            max_device_id=max_device_id,
+            title="legacy-env",
+        )
+        log.info("Legacy account from .env has been registered automatically")
+    except PermissionError:
+        log.warning("Legacy account bootstrap skipped: user has not accepted terms yet")
 
 
 async def main():
@@ -77,6 +82,15 @@ async def main():
     await manager.start_all()
 
     tg_app = build_tg_app(settings.tg_bot_token, manager, settings.tg_admin_id)
+    askme_redis = None
+    if settings.redis_url:
+        try:
+            askme_redis = redis.from_url(settings.redis_url, decode_responses=True)
+            await askme_redis.ping()
+            tg_app.bot_data["askme_redis"] = askme_redis
+        except Exception:
+            log.exception("Failed to initialize Redis client for /askme")
+            askme_redis = None
     await tg_app.initialize()
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
@@ -106,6 +120,8 @@ async def main():
         await manager.stop_all()
         await sender.stop()
         await tg_transport.stop()
+        if askme_redis:
+            await askme_redis.aclose()
 
 
 if __name__ == "__main__":

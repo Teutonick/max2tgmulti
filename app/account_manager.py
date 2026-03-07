@@ -57,7 +57,11 @@ class AccountManager:
         max_device_id: str,
         title: str = "",
     ) -> MaxAccountRecord:
-        await self._storage.ensure_user(tg_user_id)
+        if not await self._storage.has_terms_consent(tg_user_id):
+            raise PermissionError("Terms are not accepted")
+        user = await self._storage.get_user(tg_user_id)
+        if user is None:
+            await self._storage.ensure_user(tg_user_id)
         record = await self._storage.add_account(
             tg_user_id=tg_user_id,
             max_token=max_token,
@@ -75,16 +79,26 @@ class AccountManager:
         return True
 
     async def list_accounts_for_user(self, tg_user_id: int) -> list[MaxAccountRecord]:
-        await self._storage.ensure_user(tg_user_id)
         return await self._storage.list_accounts_for_user(tg_user_id)
 
     async def ensure_user(self, tg_user_id: int) -> TgUserRecord:
         return await self._storage.ensure_user(tg_user_id)
 
+    async def has_terms_consent(self, tg_user_id: int) -> bool:
+        return await self._storage.has_terms_consent(tg_user_id)
+
+    async def accept_terms(self, tg_user_id: int) -> TgUserRecord:
+        await self._storage.accept_terms(tg_user_id)
+        return await self._storage.ensure_user(tg_user_id)
+
     async def activate_user(self, tg_user_id: int) -> TgUserRecord:
+        if not await self._storage.has_terms_consent(tg_user_id):
+            raise PermissionError("Terms are not accepted")
         return await self._storage.activate_user(tg_user_id)
 
     async def deactivate_user(self, tg_user_id: int) -> tuple[TgUserRecord, int]:
+        if not await self._storage.has_terms_consent(tg_user_id):
+            raise PermissionError("Terms are not accepted")
         account_ids = await self._storage.delete_accounts_for_user(tg_user_id)
         for account_id in account_ids:
             await self._stop_runtime(account_id)
@@ -95,8 +109,8 @@ class AccountManager:
         return await self._storage.list_users_page(page=page, page_size=page_size)
 
     async def is_user_active(self, tg_user_id: int) -> bool:
-        user = await self._storage.ensure_user(tg_user_id)
-        return user.is_active
+        user = await self._storage.get_user(tg_user_id)
+        return bool(user and user.is_active)
 
     async def send_message(self, account_id: int, tg_user_id: int, max_chat_id, text: str) -> bool:
         record = await self._storage.get_account(account_id)
