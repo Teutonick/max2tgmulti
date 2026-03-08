@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.max_client import validate_max_credentials
 from app.max_listener import create_max_client
 from app.storage import DailyReportRow, MaxAccountRecord, Storage, TgUserRecord
 
@@ -78,6 +79,16 @@ class AccountManager:
         await self._stop_runtime(account_id)
         return True
 
+    async def remove_all_accounts_for_user(self, tg_user_id: int) -> int:
+        accounts = await self._storage.list_accounts_for_user(tg_user_id)
+        removed_count = 0
+        for account in accounts:
+            removed = await self._storage.deactivate_account(account.id, tg_user_id)
+            if removed:
+                removed_count += 1
+                await self._stop_runtime(account.id)
+        return removed_count
+
     async def list_accounts_for_user(self, tg_user_id: int) -> list[MaxAccountRecord]:
         return await self._storage.list_accounts_for_user(tg_user_id)
 
@@ -111,6 +122,9 @@ class AccountManager:
     async def is_user_active(self, tg_user_id: int) -> bool:
         user = await self._storage.get_user(tg_user_id)
         return bool(user and user.is_active)
+
+    async def validate_credentials(self, max_token: str, max_device_id: str) -> bool:
+        return await validate_max_credentials(max_token, max_device_id)
 
     async def send_message(
         self,

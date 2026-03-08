@@ -24,6 +24,7 @@ PENDING_REPLY_IS_DM_KEY = "pending_reply_is_dm"
 PENDING_ASKME_KEY = "pending_askme_message"
 ACCEPT_TERMS_CALLBACK = "accept_terms"
 ASKME_COOLDOWN_SEC = 24 * 60 * 60
+REMOVE_ALL_CALLBACK_PREFIX = "remove_all"
 
 TERMS_TEXT = (
     "*Отказ от ответсвенности:*\n"
@@ -85,9 +86,9 @@ def _user_help() -> str:
     return (
         "Доступные команды:\n"
         "/help - показать команды\n"
-        "/register <device_id> <token> [name] - привязать MAX аккаунт\n"
+        "/register <device_id> <token> <name> - привязать MAX аккаунт\n"
         "/accounts - список ваших MAX аккаунтов\n"
-        "/remove <account_id> - отключить вашу привязку\n"
+        "/remove - отключить все ваши привязки (с подтверждением)\n"
         "/askme - отправить сообщение администратору (раз в 24 часа)\n"
         "/cancel - отменить текущий reply"
     )
@@ -102,9 +103,9 @@ def _admin_help() -> str:
         "/deactivate <tg_user_id> - деактивировать пользователя\n"
         "/users [page] - список пользователей и статусы (по 10)\n"
         "/reports - статистика входящих MAX и ответов TG за 10 дней\n"
-        "/register <device_id> <token> [name] - привязать MAX себе\n"
+        "/register <device_id> <token> <name> - привязать MAX себе\n"
         "/accounts - список ваших MAX аккаунтов\n"
-        "/remove <account_id> - отключить вашу привязку\n"
+        "/remove - отключить все ваши привязки (с подтверждением)\n"
         "/askme - отправить сообщение администратору (раз в 24 часа)\n"
         "/cancel - отменить текущий reply"
     )
@@ -113,7 +114,7 @@ def _admin_help() -> str:
 def _max_creds_guide_register() -> str:
     return (
         "Формат:\n"
-        "/register <device_id> <token> [name]\n\n"
+        "/register <device_id> <token> <name>\n\n"
         "Пример:\n"
         "/register 7f4c1e9a-xxxx-xxxx-xxxx-xxxxxxxxxxxx eyJhbGciOi... Мой MAX\n\n"
         "Где взять параметры MAX:\n"
@@ -140,6 +141,23 @@ def _max_creds_guide_bind() -> str:
         "   - __oneme_device_id -> это <device_id>\n"
         "   - __oneme_auth -> это <token>"
     )
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 32 for ch in value)
+
+
+def _validate_register_fields(device_id: str, token: str) -> bool:
+    # DB layer already uses parameterized SQL; this guards malformed/unexpected input early.
+    if not device_id or not token:
+        return False
+    if len(device_id) > 128 or len(token) > 4096:
+        return False
+    if _has_control_chars(device_id) or _has_control_chars(token):
+        return False
+    if any(ch.isspace() for ch in device_id) or any(ch.isspace() for ch in token):
+        return False
+    return True
 
 
 def _display_user(update: Update) -> str:
@@ -209,13 +227,23 @@ async def _on_register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
 
     args = context.args or []
-    if len(args) < 2:
+    if len(args) < 3:
         await update.message.reply_text(_max_creds_guide_register())
         return
 
     device_id = args[0].strip()
     token = args[1].strip()
-    title = " ".join(args[2:]).strip()
+    if not _validate_register_fields(device_id, token):
+        await update.message.reply_text("⚠️ Некорректный формат реквизитов MAX.")
+        return
+    title = " ".join(args[2:]).strip()[:25]
+    if not title:
+        await update.message.reply_text("⚠️ Укажите имя связки (до 25 символов).")
+        return
+    is_valid_creds = await manager.validate_credentials(max_token=token, max_device_id=device_id)
+    if not is_valid_creds:
+        await update.message.reply_text("⚠️ Реквизиты MAX некорректны: device_id/token не приняты.")
+        return
     try:
         record = await manager.add_account(
             tg_user_id=tg_user_id,
@@ -248,7 +276,14 @@ async def _on_bind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     target_user_id = int(args[0])
     device_id = args[1].strip()
     token = args[2].strip()
-    title = " ".join(args[3:]).strip()
+    if not _validate_register_fields(device_id, token):
+        await update.message.reply_text("⚠️ Некорректный формат реквизитов MAX.")
+        return
+    title = " ".join(args[3:]).strip()[:25]
+    is_valid_creds = await manager.validate_credentials(max_token=token, max_device_id=device_id)
+    if not is_valid_creds:
+        await update.message.reply_text("⚠️ Реквизиты MAX некорректны: device_id/token не приняты.")
+        return
     try:
         record = await manager.add_account(
             tg_user_id=target_user_id,
@@ -421,18 +456,63 @@ async def _on_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not await _ensure_terms_accepted(update, context):
         return
     manager: AccountManager = context.bot_data["account_manager"]
-    args = context.args or []
-    if len(args) != 1 or not args[0].isdigit():
-        await update.message.reply_text("Формат: /remove <account_id>")
+    tg_user_id = int(update.effective_user.id)
+    accounts = await manager.list_accounts_for_user(tg_user_id)
+    if not accounts:
+        await update.message.reply_text("У вас нет активных привязок MAX.")
+        return
+    kb = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton(
+                "✅ Подтвердить",
+                callback_data=f"{REMOVE_ALL_CALLBACK_PREFIX}:confirm:{tg_user_id}",
+            ),
+            InlineKeyboardButton(
+                "❌ Отмена",
+                callback_data=f"{REMOVE_ALL_CALLBACK_PREFIX}:cancel:{tg_user_id}",
+            ),
+        ]]
+    )
+    await update.message.reply_text(
+        f"⚠️ Будут отключены все ваши активные привязки MAX: {len(accounts)} шт.\n"
+        "Подтвердить действие?",
+        reply_markup=kb,
+    )
+
+
+async def _on_remove_all_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_private_chat(update):
+        return
+    if not await _ensure_terms_accepted(update, context):
+        return
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data or ""
+    parts = data.split(":", 2)
+    if len(parts) != 3 or parts[0] != REMOVE_ALL_CALLBACK_PREFIX:
+        return
+    action, owner_id_str = parts[1], parts[2]
+    if not owner_id_str.isdigit():
+        await query.answer("Некорректный запрос.", show_alert=True)
+        return
+    owner_id = int(owner_id_str)
+    actor_id = int(update.effective_user.id)
+    if owner_id != actor_id:
+        await query.answer("Это подтверждение не для вашего аккаунта.", show_alert=True)
         return
 
-    account_id = int(args[0])
-    tg_user_id = int(update.effective_user.id)
-    ok = await manager.remove_account(account_id, tg_user_id)
-    if ok:
-        await update.message.reply_text(f"✅ Аккаунт {account_id} отключен.")
-    else:
-        await update.message.reply_text("⚠️ Аккаунт не найден или недоступен.")
+    if action == "cancel":
+        await query.message.edit_text("❌ Отключение привязок отменено.")
+        return
+    if action != "confirm":
+        return
+
+    manager: AccountManager = context.bot_data["account_manager"]
+    removed_count = await manager.remove_all_accounts_for_user(actor_id)
+    await query.message.edit_text(
+        f"✅ Отключено привязок MAX: {removed_count}."
+    )
 
 
 async def _on_askme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -645,6 +725,7 @@ def register_handlers(app: Application) -> None:
 
     app.add_handler(CallbackQueryHandler(_on_accept_terms, pattern=r"^accept_terms$"))
     app.add_handler(CallbackQueryHandler(_on_reply_button, pattern=r"^reply:"))
+    app.add_handler(CallbackQueryHandler(_on_remove_all_confirm, pattern=r"^remove_all:"))
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND & private_filter, _on_text_reply)
     )

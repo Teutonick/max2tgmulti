@@ -44,6 +44,68 @@ _HTTP_HEADERS = {
 }
 
 
+async def validate_max_credentials(token: str, device_id: str, timeout_sec: float = 12.0) -> bool:
+    """Validate Max credentials by performing WS handshake + auth snapshot."""
+    if not token or not device_id:
+        return False
+    seq = 0
+    deadline = time.monotonic() + max(3.0, float(timeout_sec))
+    auth_sent = False
+    try:
+        async with aiohttp.ClientSession(headers=_BROWSER_HEADERS) as session:
+            async with session.ws_connect(MaxClient.WS_URL, headers=_WS_HEADERS, ssl=False) as ws:
+                async def _send(opcode: int, payload: dict) -> None:
+                    nonlocal seq
+                    pkt = {
+                        "ver": 11,
+                        "cmd": 0,
+                        "seq": seq,
+                        "opcode": opcode,
+                        "payload": payload,
+                    }
+                    seq += 1
+                    await ws.send_str(json.dumps(pkt, ensure_ascii=False))
+
+                await _send(
+                    OpCode.HANDSHAKE,
+                    {
+                        "deviceId": device_id,
+                        "userAgent": {
+                            "deviceType": "WEB",
+                            "deviceName": "Chrome 131.0.0.0",
+                        },
+                        "appVersion": "25.12.11",
+                    },
+                )
+
+                while time.monotonic() < deadline:
+                    timeout_left = max(0.2, deadline - time.monotonic())
+                    msg = await ws.receive(timeout=timeout_left)
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        return False
+                    data = json.loads(msg.data)
+                    op = data.get("opcode")
+                    cmd = data.get("cmd")
+                    if op == OpCode.HANDSHAKE and cmd == 1 and not auth_sent:
+                        await _send(
+                            OpCode.AUTH_SNAPSHOT,
+                            {
+                                "chatsCount": 1,
+                                "interactive": False,
+                                "token": token,
+                            },
+                        )
+                        auth_sent = True
+                        continue
+                    if op == OpCode.AUTH_SNAPSHOT and cmd == 1:
+                        return True
+                    if op == OpCode.AUTH_SNAPSHOT and cmd == 3:
+                        return False
+    except Exception:
+        return False
+    return False
+
+
 class OpCode(IntEnum):
     HEARTBEAT_PING = 1
     HANDSHAKE = 6
