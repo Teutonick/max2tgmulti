@@ -12,10 +12,11 @@ PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
-def _header(msg: MaxMessage, sender_label: str, chat_label: str, is_dm: bool) -> str:
+def _header(sender_label: str, chat_label: str, is_dm: bool, account_label: str = "") -> str:
+    account_part = f"👾 <b>{escape(account_label)}</b>" if account_label else ""
     if is_dm:
-        return f"✉ <b>{sender_label}</b>"
-    return f"💬 <b>{chat_label}</b> | {sender_label}"
+        return f"{account_part} | {sender_label}" if account_part else sender_label
+    return f"{account_part} 💬 <b>{chat_label}</b> | {sender_label}" if account_part else f"💬 <b>{chat_label}</b> | {sender_label}"
 
 
 def _extract_photo_url(attach: dict) -> str | None:
@@ -263,9 +264,7 @@ def create_max_client(
         sender_label = escape(sender_name if sender_name and sender_name != "None" else "Неизвестный")
         is_dm = resolver.is_dm(msg.chat_id)
         chat_label = escape(resolver.chat_name(msg.chat_id))
-        header_text = _header(msg, sender_label, chat_label, is_dm)
-        if account_label:
-            header_text = f"👾 <b>{escape(account_label)}</b>\n{header_text}"
+        header_text = _header(sender_label, chat_label, is_dm, account_label=account_label)
         kb = reply_keyboard(account_id, msg.chat_id, is_dm) if reply_enabled else None
 
         if stats_callback:

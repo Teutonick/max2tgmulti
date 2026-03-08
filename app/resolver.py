@@ -25,7 +25,11 @@ class ContactResolver:
         return self.chats.get(chat_id, str(chat_id))
 
     def is_dm(self, chat_id: Any) -> bool:
-        return self.chat_types.get(chat_id) == "DIALOG"
+        ctype = self.chat_types.get(chat_id)
+        if ctype == "DIALOG":
+            return True
+        # Fallback when chat meta is not resolved yet.
+        return isinstance(chat_id, int) and chat_id > 0
 
     def user_name(self, user_id: Any) -> str:
         return self.users.get(user_id, str(user_id))
