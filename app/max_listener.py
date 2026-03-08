@@ -264,26 +264,20 @@ def create_max_client(
         header_text = _header(msg, sender_label, chat_label, is_dm)
         if account_label:
             header_text = f"🧩 <b>{escape(account_label)}</b>\n{header_text}"
-        kb = reply_keyboard(account_id, msg.chat_id) if reply_enabled else None
+        kb = reply_keyboard(account_id, msg.chat_id, is_dm) if reply_enabled else None
+
+        if stats_callback:
+            incoming_metric = "forward_dm" if is_dm else "forward_group"
+            try:
+                await stats_callback(incoming_metric)
+            except Exception:
+                log.exception("Failed to write report metric=%s", incoming_metric)
 
         link = msg.link
         link_type = link.get("type") if isinstance(link, dict) else None
 
         if link_type in ("FORWARD", "REPLY"):
             await _handle_linked_message(link, link_type, header_text, client, sender, resolver, tg_user_id, kb=kb)
-            if stats_callback:
-                metric = "forward_dm" if link_type == "FORWARD" and is_dm else None
-                if link_type == "FORWARD" and not is_dm:
-                    metric = "forward_group"
-                if link_type == "REPLY" and is_dm:
-                    metric = "reply_dm"
-                if link_type == "REPLY" and not is_dm:
-                    metric = "reply_group"
-                if metric:
-                    try:
-                        await stats_callback(metric)
-                    except Exception:
-                        log.exception("Failed to write report metric=%s", metric)
             if msg.text:
                 await sender.send(tg_user_id, f"{header_text}\n{escape(msg.text)}", reply_markup=kb)
             log.info("Forwarded link type=%s → TG", link_type)

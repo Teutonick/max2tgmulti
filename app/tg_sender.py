@@ -13,10 +13,11 @@ TG_CAPTION_MAX = 1024
 MAX_RETRIES = 3
 
 
-def reply_keyboard(account_id: int, max_chat_id) -> InlineKeyboardMarkup:
+def reply_keyboard(account_id: int, max_chat_id, is_dm: bool) -> InlineKeyboardMarkup:
     """Build an inline keyboard with a single 'Reply' button."""
+    chat_kind = "dm" if is_dm else "group"
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("💬 Ответить", callback_data=f"reply:{account_id}:{max_chat_id}")
+        InlineKeyboardButton("💬 Ответить", callback_data=f"reply:{account_id}:{max_chat_id}:{chat_kind}")
     ]])
 
 

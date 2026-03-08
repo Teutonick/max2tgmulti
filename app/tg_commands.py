@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 PENDING_REPLY_CHAT_KEY = "pending_reply_chat_id"
 PENDING_REPLY_LABEL_KEY = "pending_reply_label"
 PENDING_REPLY_ACCOUNT_KEY = "pending_reply_account_id"
+PENDING_REPLY_IS_DM_KEY = "pending_reply_is_dm"
 PENDING_ASKME_KEY = "pending_askme_message"
 ACCEPT_TERMS_CALLBACK = "accept_terms"
 ASKME_COOLDOWN_SEC = 24 * 60 * 60
@@ -100,7 +101,7 @@ def _admin_help() -> str:
         "/activate <tg_user_id> - активировать пользователя\n"
         "/deactivate <tg_user_id> - деактивировать пользователя\n"
         "/users [page] - список пользователей и статусы (по 10)\n"
-        "/reports - статистика репостов/реплаев за 10 дней\n"
+        "/reports - статистика входящих MAX и ответов TG за 10 дней\n"
         "/register <device_id> <token> [name] - привязать MAX себе\n"
         "/accounts - список ваших MAX аккаунтов\n"
         "/remove <account_id> - отключить вашу привязку\n"
@@ -357,7 +358,7 @@ async def _on_reports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     lines = [
         "Отчет за последние 10 дней:",
-        "дата | репосты ЛС | репосты групп | реплаи ЛС | реплаи групп",
+        "дата | входящие MAX ЛС | входящие MAX группы | ответы TG в ЛС | ответы TG в группы",
     ]
     for row in rows:
         lines.append(
@@ -455,11 +456,12 @@ async def _on_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
 
     data = query.data or ""
-    parts = data.split(":", 2)
-    if len(parts) != 3 or parts[0] != "reply":
+    parts = data.split(":", 3)
+    if len(parts) < 3 or parts[0] != "reply":
         return
 
     account_id_str, chat_id_str = parts[1], parts[2]
+    chat_kind = parts[3] if len(parts) == 4 else ""
     if not account_id_str.isdigit():
         await query.message.reply_text("⚠️ Некорректный account_id.")
         return
@@ -470,8 +472,17 @@ async def _on_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except ValueError:
         max_chat_id = chat_id_str
 
+    if chat_kind == "dm":
+        is_dm = True
+    elif chat_kind == "group":
+        is_dm = False
+    else:
+        # Backward compatibility for old callback payloads without explicit chat kind.
+        is_dm = isinstance(max_chat_id, int) and max_chat_id >= 0
+
     context.user_data[PENDING_REPLY_ACCOUNT_KEY] = account_id
     context.user_data[PENDING_REPLY_CHAT_KEY] = max_chat_id
+    context.user_data[PENDING_REPLY_IS_DM_KEY] = is_dm
 
     source_text = query.message.text or query.message.caption or ""
     label = source_text.split("\n")[0] if source_text else str(max_chat_id)
@@ -492,6 +503,7 @@ async def _on_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if context.user_data.pop(PENDING_REPLY_CHAT_KEY, None) is not None:
         context.user_data.pop(PENDING_REPLY_LABEL_KEY, None)
         context.user_data.pop(PENDING_REPLY_ACCOUNT_KEY, None)
+        context.user_data.pop(PENDING_REPLY_IS_DM_KEY, None)
         await update.message.reply_text("❌ Ответ отменен.")
     else:
         await update.message.reply_text("Нет активного ответа для отмены.")
@@ -505,12 +517,23 @@ async def _on_text_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     account_id = context.user_data.pop(PENDING_REPLY_ACCOUNT_KEY, None)
     max_chat_id = context.user_data.pop(PENDING_REPLY_CHAT_KEY, None)
     label = context.user_data.pop(PENDING_REPLY_LABEL_KEY, None)
+    is_dm = context.user_data.pop(PENDING_REPLY_IS_DM_KEY, None)
     if account_id is not None and max_chat_id is not None:
         manager: AccountManager = context.bot_data["account_manager"]
         tg_user_id = int(update.effective_user.id)
         text = update.message.text
+        if isinstance(is_dm, bool):
+            reply_metric = "reply_dm" if is_dm else "reply_group"
+        else:
+            reply_metric = "reply_dm" if isinstance(max_chat_id, int) and max_chat_id >= 0 else "reply_group"
         try:
-            ok = await manager.send_message(account_id, tg_user_id, max_chat_id, text)
+            ok = await manager.send_message(
+                account_id,
+                tg_user_id,
+                max_chat_id,
+                text,
+                reply_metric=reply_metric,
+            )
             if ok:
                 await update.message.reply_text(
                     f"✅ Отправлено -> <b>{label or max_chat_id}</b>",

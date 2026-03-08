@@ -112,7 +112,14 @@ class AccountManager:
         user = await self._storage.get_user(tg_user_id)
         return bool(user and user.is_active)
 
-    async def send_message(self, account_id: int, tg_user_id: int, max_chat_id, text: str) -> bool:
+    async def send_message(
+        self,
+        account_id: int,
+        tg_user_id: int,
+        max_chat_id,
+        text: str,
+        reply_metric: str | None = None,
+    ) -> bool:
         record = await self._storage.get_account(account_id)
         if not record or not record.is_active or record.tg_user_id != tg_user_id:
             return False
@@ -120,7 +127,13 @@ class AccountManager:
         if not runtime:
             return False
         resp = await runtime.client.send_message(max_chat_id, text)
-        return bool(resp)
+        ok = bool(resp)
+        if ok and reply_metric:
+            try:
+                await self._storage.increment_daily_metric(reply_metric)
+            except Exception:
+                log.exception("Failed to write report metric=%s", reply_metric)
+        return ok
 
     async def get_daily_report(self, days: int = 10) -> list[DailyReportRow]:
         return await self._storage.get_daily_report(days=days)
