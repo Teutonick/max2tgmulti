@@ -302,7 +302,7 @@ class MaxClient:
             await self._send(
                 OpCode.AUTH_SNAPSHOT,
                 {
-                    "chatsCount": 200,
+                    "chatsCount": 10,
                     "interactive": True,
                     "token": self.token,
                 },
@@ -314,6 +314,11 @@ class MaxClient:
 
             if self._on_ready_cb:
                 await self._on_ready_cb(payload)
+
+        elif op == OpCode.AUTH_SNAPSHOT and cmd == 3:
+            err_code = payload.get("error") if isinstance(payload, dict) else None
+            err_title = payload.get("title") if isinstance(payload, dict) else None
+            log.warning("Auth failed: error=%s title=%s", err_code, err_title)
 
         elif op == OpCode.DISPATCH:
             self._dispatch_counter += 1
