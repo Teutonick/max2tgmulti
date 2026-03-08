@@ -12,7 +12,8 @@ from shutil import copy2
 log = logging.getLogger(__name__)
 
 LOG_DIR = "logs"
-LOG_FILE = "max2tg.log"
+APP_LOG_FILE = "app.log"
+DB_LOG_FILE = "db.log"
 LOG_MAX_BYTES = 1 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
 
@@ -20,21 +21,47 @@ BACKUP_INTERVAL_SEC = 7 * 24 * 60 * 60
 BACKUP_KEEP_COUNT = 4
 
 
+class _DbOnlyFilter(logging.Filter):
+    DB_PREFIXES = ("app.storage", "app.maintenance", "aiosqlite", "sqlite3")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.name.startswith(self.DB_PREFIXES)
+
+
+class _AppOnlyFilter(logging.Filter):
+    DB_PREFIXES = ("app.storage", "app.maintenance", "aiosqlite", "sqlite3")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith(self.DB_PREFIXES)
+
+
 def configure_logging(debug: bool) -> None:
     level = logging.DEBUG if debug else logging.INFO
     os.makedirs(LOG_DIR, exist_ok=True)
-    log_path = os.path.join(LOG_DIR, LOG_FILE)
+    app_log_path = os.path.join(LOG_DIR, APP_LOG_FILE)
+    db_log_path = os.path.join(LOG_DIR, DB_LOG_FILE)
 
     formatter = logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 
-    file_handler = RotatingFileHandler(
-        log_path,
+    app_file_handler = RotatingFileHandler(
+        app_log_path,
         maxBytes=LOG_MAX_BYTES,
         backupCount=LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
-    file_handler.setLevel(level)
-    file_handler.setFormatter(formatter)
+    app_file_handler.setLevel(level)
+    app_file_handler.setFormatter(formatter)
+    app_file_handler.addFilter(_AppOnlyFilter())
+
+    db_file_handler = RotatingFileHandler(
+        db_log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    db_file_handler.setLevel(level)
+    db_file_handler.setFormatter(formatter)
+    db_file_handler.addFilter(_DbOnlyFilter())
 
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(level)
@@ -42,7 +69,7 @@ def configure_logging(debug: bool) -> None:
 
     logging.basicConfig(
         level=level,
-        handlers=[stream_handler, file_handler],
+        handlers=[stream_handler, app_file_handler, db_file_handler],
         force=True,
     )
 

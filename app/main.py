@@ -58,7 +58,7 @@ async def main():
 
     log.info("Debug mode: %s", "ON" if settings.debug else "OFF")
 
-    storage = Storage(settings.db_path)
+    storage = Storage(settings.db_path, encryption_key=settings.encryption_key)
     await storage.init()
     await storage.cleanup_daily_metrics_if_needed(keep_days=180)
 
@@ -107,7 +107,7 @@ async def main():
     await tg_app.updater.start_polling(drop_pending_updates=True)
     log.info("Telegram polling started")
     try:
-        await tg_transport.bot.send_message(chat_id=settings.tg_admin_id, text="я запустился")
+        await tg_transport.bot.send_message(chat_id=settings.tg_admin_id, text="🤫 я запустилась")
     except Exception:
         log.exception("Failed to send startup notification to admin_id=%s", settings.tg_admin_id)
 

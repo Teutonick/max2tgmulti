@@ -6,6 +6,9 @@ from datetime import date, timedelta
 from typing import Any
 
 import aiosqlite
+from cryptography.exceptions import InvalidTag
+
+from app.crypto_box import SecretBox
 
 
 @dataclass(frozen=True)
@@ -38,9 +41,10 @@ class DailyReportRow:
 
 
 class Storage:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, encryption_key: str):
         self._db_path = db_path
         self._last_stats_cleanup_day: str | None = None
+        self._box = SecretBox(encryption_key)
 
     async def init(self) -> None:
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
@@ -98,6 +102,7 @@ class Storage:
                     )
                     """
                 )
+            await self._migrate_encrypt_account_secrets(db)
             await db.commit()
 
     async def _ensure_column(self, db: aiosqlite.Connection, table: str, column: str, column_sql: str) -> None:
@@ -130,13 +135,19 @@ class Storage:
             )
             await db.commit()
 
-    @staticmethod
-    def _row_to_account(row: Any) -> MaxAccountRecord:
+    def _row_to_account(self, row: Any) -> MaxAccountRecord:
+        raw_token = str(row["max_token"])
+        raw_device_id = str(row["max_device_id"])
+        try:
+            max_token = self._box.decrypt(raw_token)
+            max_device_id = self._box.decrypt(raw_device_id)
+        except (InvalidTag, ValueError, TypeError) as exc:
+            raise ValueError("Failed to decrypt account secrets. Check ENCRYPTION_KEY.") from exc
         return MaxAccountRecord(
             id=int(row["id"]),
             tg_user_id=int(row["tg_user_id"]),
-            max_token=str(row["max_token"]),
-            max_device_id=str(row["max_device_id"]),
+            max_token=max_token,
+            max_device_id=max_device_id,
             title=str(row["title"] or ""),
             is_active=bool(row["is_active"]),
         )
@@ -261,6 +272,8 @@ class Storage:
         max_device_id: str,
         title: str = "",
     ) -> MaxAccountRecord:
+        enc_token = self._box.encrypt(max_token)
+        enc_device_id = self._box.encrypt(max_device_id)
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
@@ -268,7 +281,7 @@ class Storage:
                 INSERT INTO max_accounts (tg_user_id, max_token, max_device_id, title, is_active)
                 VALUES (?, ?, ?, ?, 1)
                 """,
-                (tg_user_id, max_token, max_device_id, title),
+                (tg_user_id, enc_token, enc_device_id, title),
             )
             await db.commit()
             acc_id = int(cur.lastrowid)
@@ -278,6 +291,27 @@ class Storage:
             )
             row = await row_cur.fetchone()
             return self._row_to_account(row)
+
+    async def _migrate_encrypt_account_secrets(self, db: aiosqlite.Connection) -> None:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id, max_token, max_device_id FROM max_accounts"
+        )
+        rows = await cur.fetchall()
+        for row in rows:
+            token = str(row["max_token"] or "")
+            device_id = str(row["max_device_id"] or "")
+            new_token = token if self._box.is_encrypted(token) else self._box.encrypt(token)
+            new_device_id = device_id if self._box.is_encrypted(device_id) else self._box.encrypt(device_id)
+            if new_token != token or new_device_id != device_id:
+                await db.execute(
+                    """
+                    UPDATE max_accounts
+                    SET max_token = ?, max_device_id = ?
+                    WHERE id = ?
+                    """,
+                    (new_token, new_device_id, int(row["id"])),
+                )
 
     async def list_accounts_for_user(self, tg_user_id: int) -> list[MaxAccountRecord]:
         async with aiosqlite.connect(self._db_path) as db:

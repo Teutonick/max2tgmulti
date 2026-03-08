@@ -73,6 +73,7 @@ cp .env.example .env
 |---|---|---|
 | `TG_BOT_TOKEN` | да | Токен Telegram-бота |
 | `TG_ADMIN_ID` | да | Telegram ID администратора бота |
+| `ENCRYPTION_KEY` | да | Секрет для шифрования `max_token` и `max_device_id` в SQLite |
 | `DB_PATH` | нет | Путь к SQLite БД (по умолчанию `data/max2tg.sqlite3`) |
 | `REDIS_URL` | нет | URL Redis для внешней очереди отправки (по умолчанию `redis://127.0.0.1:6379/0`; при недоступности fallback в память) |
 | `REDIS_KEY_PREFIX` | нет | Глобальный префикс ключей Redis (по умолчанию `max2tg`) |
@@ -327,6 +328,7 @@ cp .env.example .env
 |---|---|---|
 | `TG_BOT_TOKEN` | yes | Telegram bot token |
 | `TG_ADMIN_ID` | yes | Telegram bot admin user ID |
+| `ENCRYPTION_KEY` | yes | Secret used to encrypt `max_token` and `max_device_id` in SQLite |
 | `DB_PATH` | no | SQLite path (default `data/max2tg.sqlite3`) |
 | `REDIS_URL` | no | Redis URL for outbound queue backend (default `redis://127.0.0.1:6379/0`; falls back to memory if unavailable) |
 | `REDIS_KEY_PREFIX` | no | Global Redis key prefix (default `max2tg`) |

@@ -15,6 +15,7 @@ class Settings:
     tg_queue_workers: int
     tg_min_send_interval_ms: int
     tg_queue_max_attempts: int
+    encryption_key: str
     debug: bool = False
     reply_enabled: bool = False
 
@@ -22,7 +23,7 @@ class Settings:
 def load_settings() -> Settings:
     load_dotenv()
 
-    required = ["TG_BOT_TOKEN", "TG_ADMIN_ID"]
+    required = ["TG_BOT_TOKEN", "TG_ADMIN_ID", "ENCRYPTION_KEY"]
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise SystemExit(
@@ -40,6 +41,7 @@ def load_settings() -> Settings:
         tg_queue_workers=int(os.environ.get("TG_QUEUE_WORKERS", "3")),
         tg_min_send_interval_ms=int(os.environ.get("TG_MIN_SEND_INTERVAL_MS", "80")),
         tg_queue_max_attempts=int(os.environ.get("TG_QUEUE_MAX_ATTEMPTS", "3")),
+        encryption_key=os.environ["ENCRYPTION_KEY"],
         debug=os.environ.get("DEBUG", "").lower() in ("1", "true", "yes"),
         reply_enabled=os.environ.get("REPLY_ENABLED", "").lower() in ("1", "true", "yes"),
     )
