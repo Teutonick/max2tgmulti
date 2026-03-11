@@ -36,6 +36,7 @@ class DailyReportRow:
     day: str
     forward_dm: int
     forward_group: int
+    forward_channel: int
     reply_dm: int
     reply_group: int
 
@@ -376,7 +377,7 @@ class Storage:
             return account_ids
 
     async def increment_daily_metric(self, metric: str, stat_day: str | None = None) -> None:
-        if metric not in {"forward_dm", "forward_group", "reply_dm", "reply_group"}:
+        if metric not in {"forward_dm", "forward_group", "forward_channel", "reply_dm", "reply_group"}:
             raise ValueError(f"Unsupported metric: {metric}")
         day = stat_day or date.today().isoformat()
         async with aiosqlite.connect(self._db_path) as db:
@@ -440,6 +441,7 @@ class Storage:
                     day=day_str,
                     forward_dm=int(day_metrics.get("forward_dm", 0)),
                     forward_group=int(day_metrics.get("forward_group", 0)),
+                    forward_channel=int(day_metrics.get("forward_channel", 0)),
                     reply_dm=int(day_metrics.get("reply_dm", 0)),
                     reply_group=int(day_metrics.get("reply_group", 0)),
                 )

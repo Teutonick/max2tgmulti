@@ -262,13 +262,17 @@ def create_max_client(
         await resolver.ensure_chat_meta(msg.chat_id)
         sender_name = await resolver.resolve_user(msg.sender_id)
         sender_label = escape(sender_name if sender_name and sender_name != "None" else "Неизвестный")
+        is_channel = resolver.is_channel(msg.chat_id)
         is_dm = resolver.is_dm(msg.chat_id)
         chat_label = escape(resolver.chat_name(msg.chat_id))
         header_text = _header(sender_label, chat_label, is_dm, account_label=account_label)
         kb = reply_keyboard(account_id, msg.chat_id, is_dm) if reply_enabled else None
 
         if stats_callback:
-            incoming_metric = "forward_dm" if is_dm else "forward_group"
+            if is_channel:
+                incoming_metric = "forward_channel"
+            else:
+                incoming_metric = "forward_dm" if is_dm else "forward_group"
             try:
                 await stats_callback(incoming_metric)
             except Exception:

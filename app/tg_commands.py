@@ -531,11 +531,11 @@ async def _on_reports(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     lines = [
         "Отчет за последние 10 дней:",
-        "дата | входящие MAX ЛС | входящие MAX группы | ответы TG в ЛС | ответы TG в группы",
+        "дата | MAX ЛС | MAX группы | MAX каналы | ответы в ЛС | ответы в группы",
     ]
     for row in rows:
         lines.append(
-            f"{row.day} | {row.forward_dm} | {row.forward_group} | {row.reply_dm} | {row.reply_group}"
+            f"{row.day} | {row.forward_dm} | {row.forward_group} | {row.forward_channel} | {row.reply_dm} | {row.reply_group}"
         )
     await update.message.reply_text("\n".join(lines))
 

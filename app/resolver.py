@@ -31,6 +31,10 @@ class ContactResolver:
         # Fallback when chat meta is not resolved yet.
         return isinstance(chat_id, int) and chat_id > 0
 
+    def is_channel(self, chat_id: Any) -> bool:
+        ctype = str(self.chat_types.get(chat_id) or "").upper()
+        return "CHANNEL" in ctype
+
     def user_name(self, user_id: Any) -> str:
         return self.users.get(user_id, str(user_id))
 
