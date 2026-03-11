@@ -16,6 +16,8 @@ def _header(sender_label: str, chat_label: str, is_dm: bool, account_label: str 
     account_part = f"👾 <b>{escape(account_label)}</b>" if account_label else ""
     if is_dm:
         return f"{account_part} | {sender_label}" if account_part else sender_label
+    if not sender_label:
+        return f"{account_part} 💬 <b>{chat_label}</b>" if account_part else f"💬 <b>{chat_label}</b>"
     return f"{account_part} 💬 <b>{chat_label}</b> | {sender_label}" if account_part else f"💬 <b>{chat_label}</b> | {sender_label}"
 
 
@@ -260,10 +262,14 @@ def create_max_client(
 
         resolver.update_chat_from_event(msg.raw, msg.chat_id)
         await resolver.ensure_chat_meta(msg.chat_id)
-        sender_name = await resolver.resolve_user(msg.sender_id)
-        sender_label = escape(sender_name if sender_name and sender_name != "None" else "Неизвестный")
         is_channel = resolver.is_channel(msg.chat_id)
         is_dm = resolver.is_dm(msg.chat_id)
+        sender_name = await resolver.resolve_user(msg.sender_id)
+        sender_missing = not sender_name or sender_name == "None" or sender_name == "Неизвестный"
+        if is_channel and sender_missing:
+            sender_label = ""
+        else:
+            sender_label = escape(sender_name if not sender_missing else "Неизвестный")
         chat_label = escape(resolver.chat_name(msg.chat_id))
         header_text = _header(sender_label, chat_label, is_dm, account_label=account_label)
         kb = reply_keyboard(account_id, msg.chat_id, is_dm) if reply_enabled else None
